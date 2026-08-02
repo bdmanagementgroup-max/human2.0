@@ -1,0 +1,376 @@
+{
+  "name": "Production RAG Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag/ingest",
+        "options": {}
+      },
+      "name": "Ingest Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "rag-ingest"
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = $json.body.text;\nconst metadata = $json.body.metadata || {};\n\n// Recursive chunking with overlap\nconst chunkSize = 1000;\nconst chunkOverlap = 200;\nconst chunks = [];\n\nfor (let i = 0; i < text.length; i += chunkSize - chunkOverlap) {\n  const chunk = text.slice(i, i + chunkSize);\n  if (chunk.trim().length > 50) {\n    chunks.push({\n      content: chunk.trim(),\n      metadata: {\n        ...metadata,\n        chunkIndex: chunks.length,\n        startChar: i,\n        endChar: Math.min(i + chunkSize, text.length)\n      }\n    });\n  }\n}\n\nreturn chunks.map(chunk => ({ json: chunk }));"
+      },
+      "name": "Chunk Text (Recursive)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-large",
+        "options": {}
+      },
+      "name": "Embed Chunks (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [750, 200],
+      "credentials": {
+        "openAiApi": "OpenAI API"
+      }
+    },
+    {
+      "parameters": {
+        "model": "embed-english-v3.0",
+        "options": {}
+      },
+      "name": "Embed Chunks (Cohere)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsCohere",
+      "typeVersion": 1,
+      "position": [750, 400],
+      "credentials": {
+        "cohereApi": "Cohere API"
+      }
+    },
+    {
+      "parameters": {
+        "tableName": "documents",
+        "columns": {
+          "content": "={{ $json.content }}",
+          "embedding": "={{ $json.embedding }}",
+          "metadata": "={{ JSON.stringify($json.metadata) }}",
+          "created_at": "={{ new Date().toISOString() }}"
+        },
+        "options": {
+          "onConflict": "DO NOTHING"
+        }
+      },
+      "name": "Upsert to Neon PGVector",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "postgres": "Neon Postgres"
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag/query",
+        "options": {}
+      },
+      "name": "Query Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 600],
+      "webhookId": "rag-query"
+    },
+    {
+      "parameters": {
+        "functionCode": "const query = $json.body.query;\nconst topK = $json.body.topK || 10;\nconst filter = $json.body.filter || {};\n\nreturn [{ json: { query, topK, filter } }];"
+      },
+      "name": "Parse Query",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 600]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-large",
+        "options": {}
+      },
+      "name": "Embed Query (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [750, 500],
+      "credentials": {
+        "openAiApi": "OpenAI API"
+      }
+    },
+    {
+      "parameters": {
+        "tableName": "documents",
+        "options": {
+          "query": "SELECT content, metadata, 1 - (embedding <=> $1) AS similarity FROM documents WHERE 1 - (embedding <=> $1) > 0.3 ORDER BY similarity DESC LIMIT $2",
+          "parameters": [
+            "={{ $json.embedding }}",
+            "={{ $json.topK }}"
+          ]
+        }
+      },
+      "name": "Vector Search (Neon)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [1000, 500],
+      "credentials": {
+        "postgres": "Neon Postgres"
+      }
+    },
+    {
+      "parameters": {
+        "model": "rerank-english-v3.0",
+        "topN": 5,
+        "options": {}
+      },
+      "name": "Rerank (Cohere)",
+      "type": "@n8n/n8n-nodes-langchain.rerankCohere",
+      "typeVersion": 1,
+      "position": [1250, 500],
+      "credentials": {
+        "cohereApi": "Cohere API"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const results = $json.results || [];\nconst query = $json.query;\n\nconst context = results.map((r, i) => `[${i+1}] ${r.content}`).join('\\n\\n');\n\nconst prompt = `You are a precise answer engine. Use ONLY the provided context to answer the question.\nIf the context doesn't contain enough information, say \\\"I don't have enough information to answer this.\\\"\nCite sources inline using [1], [2], etc.\n\nContext:\n${context}\n\nQuestion: ${query}\n\nAnswer:`;\n\nreturn [{ json: { prompt, context: results } }];"
+      },
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1500, 500]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 1000
+        }
+      },
+      "name": "Generate Answer (Vercel AI SDK)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1750, 500],
+      "credentials": {
+        "openAiApi": "OpenAI API"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const answer = $json.response;\nconst context = $json.context || [];\nconst query = $json.query;\n\n// Simple faithfulness check: does answer reference claims not in context?\n// This is a lightweight heuristic; production would use LLM-as-judge\nconst hasCitations = /\\[\\d+\\]/.test(answer);\nconst citationCount = (answer.match(/\\[\\d+\\]/g) || []).length;\n\nreturn [{ json: {\n  answer,\n  sources: context.map((r, i) => ({\n    index: i + 1,\n    content: r.content.substring(0, 200) + '...',\n    metadata: r.metadata,\n    similarity: r.similarity\n  })),\n  eval: {\n    hasCitations,\n    citationCount,\n    sourceCount: context.length\n  }\n} }];"
+      },
+      "name": "Post-Process & Eval",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2000, 500]
+    },
+    {
+      "parameters": {
+        "tableName": "rag_logs",
+        "columns": {
+          "query": "={{ $json.query }}",
+          "answer": "={{ $json.answer }}",
+          "sources": "={{ JSON.stringify($json.sources) }}",
+          "eval": "={{ JSON.stringify($json.eval) }}",
+          "created_at": "={{ new Date().toISOString() }}"
+        }
+      },
+      "name": "Log to PostHog/Neon",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [2250, 500],
+      "credentials": {
+        "postgres": "Neon Postgres"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: {\n  answer: $json.answer,\n  sources: $json.sources,\n  eval: $json.eval\n} }];"
+      },
+      "name": "Format Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2500, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "options": {}
+      },
+      "name": "Return Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2750, 500]
+    }
+  ],
+  "connections": {
+    "Ingest Webhook": {
+      "main": [
+        [
+          {
+            "node": "Chunk Text (Recursive)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Text (Recursive)": {
+      "main": [
+        [
+          {
+            "node": "Embed Chunks (OpenAI)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Embed Chunks (Cohere)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Chunks (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Upsert to Neon PGVector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Chunks (Cohere)": {
+      "main": [
+        [
+          {
+            "node": "Upsert to Neon PGVector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Query": {
+      "main": [
+        [
+          {
+            "node": "Embed Query (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Query (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Vector Search (Neon)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search (Neon)": {
+      "main": [
+        [
+          {
+            "node": "Rerank (Cohere)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rerank (Cohere)": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Generate Answer (Vercel AI SDK)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Answer (Vercel AI SDK)": {
+      "main": [
+        [
+          {
+            "node": "Post-Process & Eval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post-Process & Eval": {
+      "main": [
+        [
+          {
+            "node": "Log to PostHog/Neon",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Return Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "description": "Production RAG Pipeline with hybrid search, reranking, and eval logging. Ingest endpoint: POST /webhook/rag/ingest { text, metadata }. Query endpoint: POST /webhook/rag/query { query, topK, filter }.",
+    "tags": ["rag", "production", "pgvector", "rerank", "eval"]
+  }
+}

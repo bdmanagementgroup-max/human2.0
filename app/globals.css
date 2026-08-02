@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0A0A0F;
+  --foreground: #F4F4F8;
+  --font-geist-sans: "Geist", "Geist Fallback", sans-serif;
+  --font-geist-mono: "Geist Mono", "Geist Mono Fallback", monospace;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  overflow-x: hidden;
+}
+
+/* Selection */
+::selection {
+  background: rgba(0, 229, 255, 0.25);
+  color: #fff;
+}
+
+/* Custom utilities */
+@layer utilities {
+  .text-glow-cyan {
+    text-shadow:
+      0 0 16px rgba(0, 229, 255, 0.45),
+      0 0 32px rgba(0, 229, 255, 0.25);
+  }
+
+  .text-glow-violet {
+    text-shadow:
+      0 0 16px rgba(139, 92, 246, 0.45),
+      0 0 32px rgba(139, 92, 246, 0.25);
+  }
+
+  .text-glow-emerald {
+    text-shadow:
+      0 0 16px rgba(16, 185, 129, 0.45),
+      0 0 32px rgba(16, 185, 129, 0.25);
+  }
+
+  .text-glow-amber {
+    text-shadow:
+      0 0 16px rgba(245, 158, 11, 0.45),
+      0 0 32px rgba(245, 158, 11, 0.25);
+  }
+
+  .shadow-glow-emerald {
+    box-shadow: 0 0 32px rgba(16, 185, 129, 0.35);
+  }
+
+  .shadow-glow-amber {
+    box-shadow: 0 0 32px rgba(245, 158, 11, 0.35);
+  }
+
+  .text-gradient {
+    background: linear-gradient(135deg, #ffffff 0%, #e6faff 35%, #00e5ff 70%, #8b5cf6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  .mask-fade-r {
+    -webkit-mask-image: linear-gradient(to right, black 70%, transparent 100%);
+    mask-image: linear-gradient(to right, black 70%, transparent 100%);
+  }
+
+  .mask-fade-x {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black 10%,
+      black 90%,
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black 10%,
+      black 90%,
+      transparent 100%
+    );
+  }
+}
+
+/* Smooth scroll for anchor links */
+html {
+  scroll-behavior: smooth;
+}
