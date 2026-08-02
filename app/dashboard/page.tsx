@@ -28,6 +28,7 @@ import {
 import { getDb, tracks, content, userProgress, subscriptions } from "@/src/db";
 import { getUserWithSubscription } from "@/src/lib/auth";
 import { CancelSubscriptionButton } from "@/app/components/CancelSubscriptionButton";
+import { SubscribeButton } from "@/app/components/SubscribeButton";
 
 const trackIcons: Record<string, LucideIcon> = {
   Server,
@@ -367,12 +368,9 @@ export default async function DashboardPage() {
         {!hasSubscription && !isAdmin && (
           <div className="pt-8 border-t border-zinc-800 text-center">
             <p className="text-zinc-400 mb-4">Unlock all tracks and join the operator community</p>
-            <Link
-              href="/sign-up"
-              className="inline-flex items-center gap-2 px-8 py-4 bg-cyan-glow text-ink font-bold rounded-lg hover:bg-cyan-glow/90 transition-colors text-lg"
-            >
-              Get Full Access <ChevronRight className="w-5 h-5" />
-            </Link>
+            <div className="flex justify-center">
+              <SubscribeButton label="Get Full Access" size="lg" />
+            </div>
           </div>
         )}
       </div>
