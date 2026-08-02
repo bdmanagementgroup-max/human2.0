@@ -5,6 +5,7 @@ import { getDb } from "@/src/db";
 import { users, subscriptions } from "@/src/db/schema";
 import { eq } from "drizzle-orm";
 import { createSubscription, cancelSubscription as cancelPaypalSubscription } from "@/src/lib/paypal";
+import { getOrCreateCurrentUser } from "@/src/lib/auth";
 
 export async function createCheckoutSession(planId?: string) {
   const { userId } = await auth();
@@ -13,11 +14,7 @@ export async function createCheckoutSession(planId?: string) {
   }
 
   const db = getDb();
-  const [user] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.clerkId, userId))
-    .limit(1);
+  const user = await getOrCreateCurrentUser();
 
   if (!user) {
     throw new Error("User not found");

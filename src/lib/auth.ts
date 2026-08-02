@@ -36,6 +36,42 @@ export async function getUserWithSubscription() {
   return user ?? null;
 }
 
+/**
+ * Looks up the local users row for the signed-in Clerk user, creating it on
+ * demand if the user.created webhook hasn't synced it yet (e.g. webhook not
+ * configured, or delivery lag).
+ */
+export async function getOrCreateCurrentUser() {
+  const { userId } = await auth();
+  if (!userId) return null;
+
+  const db = getDb();
+  const [existing] = await db.select().from(users).where(eq(users.clerkId, userId)).limit(1);
+  if (existing) return existing;
+
+  const clerkUser = await currentUser();
+  if (!clerkUser) return null;
+
+  const [created] = await db
+    .insert(users)
+    .values({
+      clerkId: userId,
+      email: clerkUser.emailAddresses[0]?.emailAddress ?? "",
+      firstName: clerkUser.firstName,
+      lastName: clerkUser.lastName,
+      imageUrl: clerkUser.imageUrl,
+      role: deriveRole({ metadata: clerkUser.publicMetadata }),
+    })
+    .onConflictDoNothing({ target: users.clerkId })
+    .returning();
+
+  if (created) return created;
+
+  // Lost an insert race with the webhook — read what it wrote.
+  const [row] = await db.select().from(users).where(eq(users.clerkId, userId)).limit(1);
+  return row ?? null;
+}
+
 export async function getUserRole(): Promise<UserRole> {
   const { sessionClaims } = await auth();
   return deriveRole(sessionClaims);
